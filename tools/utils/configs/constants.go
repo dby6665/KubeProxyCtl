@@ -18,7 +18,7 @@ const (
 	CertFile = "./certs/server.pem"
 	KeyFile  = "./certs/server-key.pem"
 
-	Default = ""
+	Default               = ""
 	DefaultApiProxyPrefix = "/"
 
 	ClusterParam = "labelSelector"
@@ -32,4 +32,6 @@ const (
 	MyClusterKind             = "MyCluster"
 	MyClusterListKind         = "MyClusterList"
 	MyClusterShortName        = "mc"
+
+	OpenApiPattern = "/openapi/v[2|3]"
 )

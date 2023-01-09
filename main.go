@@ -3,8 +3,8 @@ package main
 import (
 	"crypto/tls"
 	"fmt"
-	"KubeProxyCtl/pkg/local_proxy"
-	"KubeProxyCtl/tools/utils/configs"
+	"kubeProxyCtl/pkg/local_proxy"
+	"kubeProxyCtl/tools/utils/configs"
 	"log"
 )
 
@@ -27,6 +27,7 @@ const (
 
 func main() {
 	// k get pods --selector "cluster==tx"
+	// kubectl --kubeconfig config get jc
 	//filter := &local_proxy.FilterServer{
 	//	AcceptPaths:   local_proxy.MakeRegexpArrayOrDie(DefaultPathAcceptRE),
 	//	RejectPaths:   local_proxy.MakeRegexpArrayOrDie(DefaultPathRejectRE),
@@ -38,7 +39,7 @@ func main() {
 
 	//server, err := local_proxy.NewServer("", configs.DefaultApiProxyPrefix,
 	//	"", nil, restConfig, 0)
-	server, err := local_proxy.NewServerForMultiCluster(configs.Default, configs.DefaultApiProxyPrefix,configs.Default,nil,0)
+	server, err := local_proxy.NewServerForMultiCluster(configs.Default, configs.DefaultApiProxyPrefix, configs.Default, nil, 0)
 	if err != nil {
 		log.Fatalln(err)
 	}

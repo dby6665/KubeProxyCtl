@@ -2,6 +2,7 @@ package configs
 
 import (
 	"fmt"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"log"
@@ -38,4 +39,14 @@ func (*K8sConfig) K8sRestConfigDefault() *rest.Config {
 		log.Fatal(err)
 	}
 	return config
+}
+
+//初始化client-go客户端
+func (cfg *K8sConfig) InitClient(restC *rest.Config) *kubernetes.Clientset {
+	c, err := kubernetes.NewForConfig(restC)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return c
 }

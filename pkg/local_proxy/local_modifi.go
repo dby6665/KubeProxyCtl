@@ -2,13 +2,14 @@ package local_proxy
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
-	"KubeProxyCtl/pkg/helper"
-	"KubeProxyCtl/tools/utils/configs"
+	"kubeProxyCtl/pkg/helper"
+	"kubeProxyCtl/tools/utils/configs"
 	"log"
 	"net/http"
 	"net/url"
@@ -25,29 +26,53 @@ import (
 
 type MyHttpHandler struct {
 	//http.Handler
-	defaultCtx string
-	restMap    map[string]http.Handler // key= context 名称
+	defaultCtx    string
+	restMap       map[string]http.Handler // key= context 名称
 	restConfigMap map[string]*configs.RestConfig
 }
 
 func (mh MyHttpHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
 	fmt.Println("请求路径", req.URL.Path, req.RequestURI)
 	fmt.Println("打印头", req.Header)
-	// 处理自定义资源，如果返回true 代表被我们自己拦截，不需要再请求真实 k8s
+	// 处理自定义资源，如果返回true 代表被自己拦截，不需要再请求真实 k8s
 	if NewMyResource(req, writer).HandlerForCluster(mh.restConfigMap) {
 		fmt.Println("true")
 		return
 	}
 	//解析集群参数
 	cluster := helper.ParseCluster(req) // cluster 可能是空
-	fmt.Println("[", cluster)
-	if cluster == "" {
-		cluster = mh.defaultCtx
+	if len(cluster) == 0 {
+		cluster = append(cluster, mh.defaultCtx)
 	}
-	fmt.Println(mh.defaultCtx)
-	req.Header.Add("from_cluster", cluster)
-	mh.restMap[cluster].ServeHTTP(writer, req) // 已经发送 kubectl
+	//fmt.Println("[", cluster)
+	//if cluster == "" {
+	//	cluster = mh.defaultCtx
+	//}
+	//fmt.Println(mh.defaultCtx)
+	//req.Header.Add("from_cluster", cluster)
+	//mh.restMap[cluster].ServeHTTP(writer, req) // 已经发送 kubectl
 	//mh.Handler.ServeHTTP(writer, req)
+	//遍历 所有 需要取的集群
+	writerList := []*MyWriter{}
+	for _, cc := range cluster {
+		if handler, ok := mh.restMap[cc]; ok {
+			mywriter := WrapWriter()
+			cloneReq := helper.CloneRequest(req, cc)
+			if helper.IsOpenApiRequest(cloneReq) {
+				//如果是OpenAPI 不作任何处理
+				fmt.Println("集群是", cc, "  method是", cloneReq.Method)
+				mh.restMap[cc].ServeHTTP(writer, req)
+				continue
+			}
+			writerList = append(writerList, mywriter)
+			handler.ServeHTTP(mywriter, cloneReq)
+		}
+	}
+
+	//统一响应
+	if len(writerList) > 0 {
+		WriteResponse(writer, writerList)
+	}
 
 }
 
@@ -77,7 +102,7 @@ func (mrt MyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		// 给 结果加列  只针对 Table 加 Cluster 列
 		helper.AddCustomColumn(obj, req)
 		// 显示自定义内容
-		helper.HandlerMyResource(obj,req)
+		helper.HandlerMyResource(obj, req)
 		b, err = obj.MarshalJSON()
 		if err != nil {
 			return nil, err
@@ -158,7 +183,7 @@ func NewServerForMultiCluster(filebase string, apiProxyPrefix string, staticPref
 		//mux.Handle(apiProxyPrefix, WrapperHandler(proxyHandler))
 
 	}
-	mux.Handle(apiProxyPrefix, &MyHttpHandler{restMap: restMap, defaultCtx: defaultCtx,restConfigMap: restConfigMap})
+	mux.Handle(apiProxyPrefix, &MyHttpHandler{restMap: restMap, defaultCtx: defaultCtx, restConfigMap: restConfigMap})
 	if filebase != "" {
 		// Require user to explicitly request this behavior rather than
 		// serving their working directory by default.
@@ -177,9 +202,8 @@ func NewMyResource(req *http.Request, writer http.ResponseWriter) *MyResource {
 	return &MyResource{req: req, writer: writer}
 }
 
-
 // 这个函数是给 MyResource.HandlerForCluster (H是大写的哟)调用的
-func (my *MyResource) handlerForCluster(clusters []string) []byte {
+func (my *MyResource) handlerForCluster(clusters []string, clusterMap map[string]*configs.RestConfig) []byte {
 	r := regexp.MustCompile(configs.MyCluster_pattern_handler)
 	if r.MatchString(my.req.RequestURI) && my.req.Method == "GET" {
 		// 构建一个 unstructured
@@ -194,7 +218,14 @@ func (my *MyResource) handlerForCluster(clusters []string) []byte {
 			obj.SetAPIVersion(configs.MyResourceApiVersion)
 			obj.SetKind(configs.MyClusterKind)
 			obj.SetName(cluster)
-			obj.SetCreationTimestamp(metav1.NewTime(time.Now()))
+			resC := clusterMap[cluster]
+			client := configs.K8sConfig{}
+			clientset := client.InitClient(resC.RestCfg)
+			nodes, err := clientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+			if err != nil {
+				panic(err)
+			}
+			obj.SetCreationTimestamp(metav1.NewTime(nodes.Items[0].CreationTimestamp.Time))
 			ret.Items[i] = obj
 		}
 
@@ -208,14 +239,14 @@ func (my *MyResource) handlerForCluster(clusters []string) []byte {
 	return nil
 }
 
-// 响应资源  --- 在server.go 拦截 ,目前只处理 集群列表 ，后面肯定还要加进去
+// 响应资源  --- 在server.go 拦截 ,目前只处理 集群列表
 // 返回值 bool，代表是否拦截到 。 如果是TRUE 外部则不应该继续响应
 func (my *MyResource) HandlerForCluster(clusterMap map[string]*configs.RestConfig) bool {
 	clusterNames := []string{}
 	for k, _ := range clusterMap {
 		clusterNames = append(clusterNames, k)
 	}
-	myres := my.handlerForCluster(clusterNames)
+	myres := my.handlerForCluster(clusterNames, clusterMap)
 	if myres != nil {
 		my.writer.Header().Set("Content-type", "application/json")
 		my.writer.Header().Set("Content-Length", strconv.Itoa(len(myres)))

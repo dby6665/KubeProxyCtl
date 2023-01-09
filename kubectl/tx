@@ -2,7 +2,7 @@ apiVersion: v1
 clusters:
 - cluster:
     insecure-skip-tls-verify: true
-    server: http://127.0.0.1:8919/kubernetes-tx
+    server: http://127.0.0.1:8919
   name: kubernetes
 contexts:
 - context:

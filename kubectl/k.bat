@@ -14,4 +14,4 @@ goto param
 :end
 
 
-kubectl --kubeconfig  ./hw  %params%
+kubectl --kubeconfig  ./config  %params%
